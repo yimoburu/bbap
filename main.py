@@ -1,84 +1,79 @@
 import os
-import time
-import utils
 import config
+import utils
+import pipeline
+import clustering
 from models import ModelManager
-from pipeline import process_file
+
+# --- COLAB SETUP ---
+try:
+    from google.colab import drive
+    if not os.path.exists('/content/drive'):
+        print("🔹 Mounting Google Drive...")
+        drive.mount('/content/drive')
+except ImportError:
+    pass # Assume running locally
 
 def main():
-    print("Starting Black Box Audio Protocol...")
+    print(f"🚀 Starting Daily Batch Processing...")
+    print(f"📂 Input: {config.INPUT_FOLDER}")
+    print(f"📂 Output: {config.OUTPUT_DIR}")
     
-    # 1. Setup & Checks
-    if not config.IS_LOCAL:
-        # 1a. Mount Drive (Only in Colab)
-        try:
-            from google.colab import drive
-            drive.mount('/content/drive')
-        except ImportError:
-            print("Not running in Colab, skipping Drive mount.")
-
-    if not os.path.exists(config.INPUT_DIR):
-        print(f"Warning: Input directory {config.INPUT_DIR} does not exist.")
-        # In a real deployed scenario we might want to wait or error out.
-        # For now, we'll try to create it? No, it's google drive input.
-        # We should just wait until it exists or warn user.
-        print("Please ensure Google Drive is mounted and path is correct.")
-        
     utils.ensure_dirs()
     
-    # 2. Init Models
-    try:
-        model_mgr = ModelManager()
-    except Exception as e:
-        print(f"Critical Error loading models: {e}")
+    # 1. Identify Work
+    processed = utils.get_processed_files()
+    
+    if not os.path.exists(config.INPUT_FOLDER):
+        print(f"❌ Input folder missing: {config.INPUT_FOLDER}")
         return
 
-    print(f"Monitoring {config.INPUT_DIR} every {config.CHECK_INTERVAL} seconds...")
+    # Filter files
+    all_files = [f for f in os.listdir(config.INPUT_FOLDER) if f.lower().endswith(('.m4a', '.mp3', '.wav'))]
+    pending_files = [f for f in all_files if f not in processed]
 
-    # 3. Watchdog Loop
-    while True:
+    if not pending_files:
+        print("✅ No new files to process. System is up to date.")
+        # We run maintenance anyway just in case user renamed vectors manually
+        clustering.run_maintenance()
+        return
+
+    print(f"📦 Found {len(pending_files)} new files. Initializing AI Engine...")
+    
+    # 2. Load Models (Only if work exists)
+    try:
+        model_manager = ModelManager()
+    except Exception as e:
+        print(f"❌ Failed to load models: {e}")
+        return
+    
+    stats = {'files': 0, 'errors': 0}
+    all_new_identities = set()
+
+    # 3. Batch Loop
+    for filename in pending_files:
         try:
-            processed_files = utils.load_processed_log()
+            file_path = os.path.join(config.INPUT_FOLDER, filename)
             
-            # Scan directory
-            if os.path.exists(config.INPUT_DIR):
-                files = [
-                    os.path.join(config.INPUT_DIR, f) 
-                    for f in os.listdir(config.INPUT_DIR) 
-                    if f.lower().endswith(config.AUDIO_EXTENSIONS)
-                ]
-                
-                # Sort by modification time to process oldest first? Or just name.
-                # Let's sort by name for stability.
-                files.sort()
-                
-                for file_path in files:
-                    filename = os.path.basename(file_path)
-                    
-                    if filename not in processed_files:
-                        print(f"Found new file: {filename}")
-                        try:
-                            # Run Pipeline
-                            process_file(file_path, model_mgr)
-                            
-                            # Mark done
-                            utils.save_to_processed_log(filename)
-                            print(f"Completed {filename}")
-                            
-                        except Exception as e:
-                            print(f"Error processing {filename}: {e}")
-                            # We might want to log this to an error log file
-            else:
-                print(f"Input dir not accessible yet...")
-
-        except KeyboardInterrupt:
-            print("Stopping...")
-            break
+            # Execute Pipeline
+            new_ids = pipeline.run(file_path, filename, model_manager)
+            
+            # Update Stats
+            all_new_identities.update(new_ids)
+            stats['files'] += 1
+            
+            # Commit to Log
+            utils.mark_as_processed(filename)
+            
         except Exception as e:
-            print(f"Unexpected error in watchdog loop: {e}")
-            
-        print(f"Sleeping for {config.CHECK_INTERVAL}s...")
-        time.sleep(config.CHECK_INTERVAL)
+            print(f"❌ Critical Error on {filename}: {e}")
+            stats['errors'] += 1
+
+    # 4. Post-Processing
+    clustering.run_maintenance()
+    utils.generate_daily_report(stats, all_new_identities)
+    
+    print("\n🎉 Batch Complete. You can close this runtime.")
 
 if __name__ == "__main__":
     main()

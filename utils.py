@@ -1,93 +1,82 @@
 import os
-import glob
 import re
 import numpy as np
 from datetime import datetime
 import config
 
 def ensure_dirs():
-    """Creates necessary directories if they don't exist."""
-    os.makedirs(config.TRANSCRIPTS_DIR, exist_ok=True)
+    """Create necessary project directories."""
+    os.makedirs(config.OUTPUT_DIR, exist_ok=True)
     os.makedirs(config.VECTOR_DB_DIR, exist_ok=True)
-    # Ensure LOG_FILE exists
-    if not os.path.exists(config.LOG_FILE):
-        with open(config.LOG_FILE, 'w') as f:
-            f.write("")
+    os.makedirs(config.REPORT_DIR, exist_ok=True)
 
-def load_processed_log():
-    """Reads the processed log file into a set of filenames."""
-    if not os.path.exists(config.LOG_FILE):
-        return set()
-    with open(config.LOG_FILE, 'r') as f:
-        return set(line.strip() for line in f if line.strip())
+def load_known_speakers():
+    """Load all existing speaker vectors from the Vector DB into memory."""
+    speakers = {}
+    if os.path.exists(config.VECTOR_DB_DIR):
+        for file in os.listdir(config.VECTOR_DB_DIR):
+            if file.endswith('.npy'):
+                name = os.path.splitext(file)[0]
+                try:
+                    speakers[name] = np.load(os.path.join(config.VECTOR_DB_DIR, file))
+                except Exception as e:
+                    print(f"⚠️ Corrupt vector file {file}: {e}")
+    return speakers
 
-def save_to_processed_log(filename):
-    """Appends a filename to the processed log."""
-    with open(config.LOG_FILE, 'a') as f:
-        f.write(filename + "\n")
-
-def load_vectors():
-    """
-    Loads all existing .npy files from the Vector DB directory into a dictionary.
-    Returns:
-        dict: {speaker_id (str): embedding (numpy.ndarray)}
-    """
-    vectors = {}
-    pattern = os.path.join(config.VECTOR_DB_DIR, "*.npy")
-    for file_path in glob.glob(pattern):
-        # Filename example: Person_001.npy -> speaker_id: Person_001
-        filename = os.path.basename(file_path)
-        speaker_id = os.path.splitext(filename)[0]
-        try:
-            vector = np.load(file_path)
-            vectors[speaker_id] = vector
-        except Exception as e:
-            print(f"Error loading vector {file_path}: {e}")
-    return vectors
-
-def get_next_speaker_id(existing_ids):
-    """
-    Generates the next available ID (e.g., Person_005) by scanning existing names.
-    prefix: Person_
-    """
+def get_next_speaker_id(existing_names):
+    """Scan existing Person_XXX IDs and find the next available number."""
     max_id = 0
-    pattern = re.compile(r"Person_(\d+)")
-    
-    for sid in existing_ids:
-        match = pattern.match(sid)
-        if match:
-            num = int(match.group(1))
-            if num > max_id:
-                max_id = num
-    
-    next_id_num = max_id + 1
-    return f"Person_{next_id_num:03d}"
+    for name in existing_names:
+        if name.startswith("Person_"):
+            try:
+                # Extract number from Person_005 -> 5
+                parts = name.split('_')
+                if len(parts) > 1 and parts[1].isdigit():
+                    num = int(parts[1])
+                    if num > max_id: max_id = num
+            except:
+                pass
+    return f"Person_{max_id + 1:03d}"
 
 def parse_timestamp(filename):
     """
-    Extracts date/time from filenames. 
-    Assumes format contains yyyymmdd-hhmmss or similar patterns.
-    Returns:
-        datetime object or None if not found
+    Extracts absolute start time from filename format: yyyymmdd-hhmmss.ext
+    Example: 20231027-090000.m4a -> datetime object
     """
-    # Regex for YYYYMMDD-HHMMSS (common in Voice Record Pro)
-    # Example: 20231027-143000.mp4
-    match = re.search(r"(\d{8})[-_](\d{6})", filename)
+    match = re.search(r'(\d{8}-\d{6})', filename)
     if match:
-        date_str = match.group(1)
-        time_str = match.group(2)
         try:
-            dt = datetime.strptime(f"{date_str}{time_str}", "%Y%m%d%H%M%S")
-            return dt
+            return datetime.strptime(match.group(1), "%Y%m%d-%H%M%S")
         except ValueError:
-            pass
-            
-    # Fallback: check file creation time if needed, but requirements imply filename parsing.
-    # Returning None will imply relative timestamps (starting from 00:00:00) in pipeline
+            return None
     return None
 
-def format_timestamp(seconds):
-    """Converts seconds to HH:MM:SS format."""
-    m, s = divmod(seconds, 60)
-    h, m = divmod(m, 60)
-    return f"{int(h):02d}:{int(m):02d}:{int(s):02d}"
+def get_processed_files():
+    """Reads the log file to see what we have already finished."""
+    if not os.path.exists(config.LOG_FILE): return set()
+    with open(config.LOG_FILE, 'r') as f: return set(f.read().splitlines())
+
+def mark_as_processed(filename):
+    """Appends filename to the log file."""
+    with open(config.LOG_FILE, 'a') as f: f.write(filename + '\n')
+
+def generate_daily_report(stats, new_identities):
+    """Generates a Markdown briefing of the batch run."""
+    date_str = datetime.now().strftime("%Y-%m-%d")
+    report_path = os.path.join(config.REPORT_DIR, f"Briefing_{date_str}.md")
+    
+    with open(report_path, "w", encoding="utf-8") as f:
+        f.write(f"# 📅 Daily Briefing: {date_str}\n\n")
+        f.write("## 📊 Processing Stats\n")
+        f.write(f"- Files Processed: {stats['files']}\n")
+        f.write(f"- Total Errors: {stats['errors']}\n\n")
+        
+        f.write("## 👥 Identity Updates\n")
+        if new_identities:
+            f.write("The following NEW vectors were created. Please review/rename them in `Voice_Bank/Vectors`:\n")
+            for identity in sorted(list(new_identities)):
+                f.write(f"- 🆕 `{identity}.npy`\n")
+        else:
+            f.write("No new strangers detected. All speakers recognized.\n")
+            
+    print(f"\n📝 Daily Briefing generated: {report_path}")

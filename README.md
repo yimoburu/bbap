@@ -1,81 +1,34 @@
-# Black Box Audio Protocol
+# 📦 Black Box Audio Protocol (v3.0 Batch Edition)
 
-A modular Python system for running in Google Colab to transcribe and identify speakers in audio files from Google Drive using WhisperX and Pyannote.
+A sovereign, serverless architecture for processing long-form daily audio logs into searchable text and identifying speakers using unsupervised learning.
 
-## Features
-- **Automated Transcription**: Uses WhisperX (large-v3) for high-accuracy multilingual transcription.
-- **Speaker Identifiction**: "Black Box" identity system tracks speakers across files using vector embeddings.
-- **Privacy First**: Stores only mathematical vectors, no audio clips for identity tracking.
-- **Google Drive Integration**: Automatically monitors a folder for new recordings.
+## 📂 Project Index
 
-## Installation & Usage in Google Colab
+### Configuration
+* `config.py`: Central configuration loading paths and settings from environment variables.
+* `.env.example`: Template for API keys and local paths.
 
-1. **Upload Code**: Upload the `bbap` folder (containing this README and all `.py` files) to your Google Drive (e.g., in `My Drive/bbap`).
+### Core Logic
+* `main.py`: The daily batch runner. Execute this script to process new files.
+* `pipeline.py`: The processing engine. Handles Transcription -> Alignment -> Diarization -> Identification for a single file.
+* `clustering.py`: Maintenance script to find and merge duplicate speaker identities.
 
-2. **Open Colab**: Create a new Google Colab notebook.
+### Support Modules
+* `models.py`: AI Model Manager. Loads WhisperX and Pyannote into GPU memory efficiently.
+* `utils.py`: Helper functions for file management, logging, and timestamp parsing.
 
-3. **Set Runtime**: Go to `Runtime` > `Change runtime type` and select **T4 GPU** (or better).
+### Dependencies
+* `requirements.txt`: Python packages required to run the project.
 
-4. **Secrets**:
-   - Add your Hugging Face Token as a secret named `HF_TOKEN` in Colab (key icon on the left).
-   - Ensure you have accepted terms for `pyannote/embedding` and `pyannote/speaker-diarization-3.1` (or relevant models) on Hugging Face.
+## 🚀 Quick Start (Google Colab)
 
-5. **Run the System**:
-   Copy and paste the following code into a Colab cell:
-
-   ```python
-   # 1. Mount Drive
-   from google.colab import drive
-   drive.mount('/content/drive')
-
-   # 2. Install Dependencies
-   import os
-   # Assuming you uploaded code to 'My Drive/bbap'
-   project_path = "/content/drive/My Drive/bbap" 
-   os.chdir(project_path)
-   
-   !pip install -r requirements.txt
-   
-   # Fix for some colab envs if needed (restart runtime might be required after install)
-   # !pip install -U --no-deps git+https://github.com/m-bain/whisperx.git
-
-   # 3. Authenticate with Hugging Face (retrieved from Colab secrets)
-   from google.colab import userdata
-   os.environ["HF_TOKEN"] = userdata.get('HF_TOKEN')
-   
-   # 4. Run Main
-   !python main.py
-   ```
-
-## Configuration
-Edit `config.py` to change:
-- `INPUT_DIR`: Folder to watch for audio files.
-- `PROJECT_ROOT`: Folder for output (transcripts, vectors).
-- `CHECK_INTERVAL`: How often to check for new files.
-
-## Output
-- Transcripts: `.../Processed_Conversations/[filename].txt`
-- Logs: `processed_log.txt`
-
-## Local Mode (Mac/PC)
-
-You can run this pipeline on your local machine without Google Drive.
-
-1. **Install Dependencies**:
-   ```bash
-   pip install -r requirements.txt
-   # You might need specific torch installation for your OS (e.g., Mac Metal MPS)
-   ```
-
-2. **Run in Local Mode**:
-   Set the `BBAP_LOCAL_MODE` environment variable to `1`.
-   
-   ```bash
-   export BBAP_LOCAL_MODE=1
-   export HF_TOKEN="your_hugging_face_token"
-   python main.py
-   ```
-   
-   - **Input Directory**: The script will look for audio files in `./local_input`.
-   - **Output Directory**: Results will be saved to `./local_output`.
-   - **Device**: Automatically selects `mps` (Mac), `cuda`, or `cpu`.
+1.  **Setup:** Clone this repository (or copy these files) into your Google Drive project folder (e.g., `My Drive/yuzhe`).
+2.  **Install:**
+    ```bash
+    pip install -r requirements.txt
+    ```
+3.  **Configure:** Rename `.env.example` to `.env` and add your Hugging Face Token.
+4.  **Run:**
+    ```bash
+    python main.py
+    ```
