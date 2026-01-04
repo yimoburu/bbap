@@ -65,10 +65,13 @@ def run(file_path, filename, model_manager):
             continue
 
         try:
-            # Crop audio from file specifically for this segment
-            # pyannote.core.Segment uses seconds
-            segment_def = pyannote.core.Segment(best_seg['start'], best_seg['end'])
-            wav, sr = model_manager.audio_loader.crop(file_path, segment_def)
+            # Crop audio from in-memory waveform (faster & avoids format errors)
+            start_sample = int(best_seg['start'] * 16000)
+            end_sample = int(best_seg['end'] * 16000)
+            
+            # Extract segment as tensor: (1, samples)
+            wav_data = audio[start_sample:end_sample]
+            wav = torch.from_numpy(wav_data).float().unsqueeze(0)
             
             # Generate Embedding (Fingerprint)
             # unsqueeze adds batch dimension: (1, channels, samples)
