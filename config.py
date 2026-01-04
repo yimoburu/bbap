@@ -5,8 +5,15 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # --- PATH CONFIGURATION ---
-# Base Root of Google Drive
-BASE_DIR = os.getenv('BASE_DIR', '/content/drive/My Drive')
+# Local Mode Toggle
+LOCAL_MODE = os.getenv('LOCAL_MODE', 'False').lower() == 'true'
+
+if LOCAL_MODE:
+    BASE_DIR = os.path.join(os.getcwd(), 'local_data')
+    print(f"🔹 RUNNING IN LOCAL MODE. Data directory: {BASE_DIR}")
+else:
+    # Base Root of Google Drive
+    BASE_DIR = os.getenv('BASE_DIR', '/content/drive/My Drive')
 
 # Project Root Name (e.g., 'yuzhe')
 PROJECT_ROOT_NAME = os.getenv('PROJECT_ROOT_NAME', 'yuzhe')
@@ -33,9 +40,35 @@ SIMILARITY_THRESHOLD = float(os.getenv('SIMILARITY_THRESHOLD', '0.65'))
 CLUSTER_MERGE_THRESHOLD = float(os.getenv('CLUSTER_MERGE_THRESHOLD', '0.85'))
 
 # --- AI PARAMETERS ---
-DEVICE = os.getenv('DEVICE', 'cuda')
-COMPUTE_TYPE = os.getenv('COMPUTE_TYPE', 'float16')
+import torch
+
+def detect_config():
+    if torch.cuda.is_available():
+        return "cuda", "float16"
+    elif torch.backends.mps.is_available():
+        # WhisperX/CTranslate2 doesn't fully support MPS yet.
+        # We default to CPU + int8 for stability on Mac.
+        # You can try overriding DEVICE='mps' in .env if testing support.
+        print("⚡️ MPS (Mac) detected. Defaulting to CPU (int8) for WhisperX compatibility.")
+        return "cpu", "int8"
+    else:
+        return "cpu", "int8"
+
+_default_device, _default_compute = detect_config()
+
+# 'cuda' for GPU, 'cpu' for CPU, 'mps' for Mac M1/M2/M3
+DEVICE = os.getenv('DEVICE', _default_device)
+# 'float16' for GPU, 'float32' or 'int8' for CPU
+COMPUTE_TYPE = os.getenv('COMPUTE_TYPE', _default_compute)
+# Batch size for processing
 BATCH_SIZE = int(os.getenv('BATCH_SIZE', '16'))
+# Whisper Model Size (tiny, base, small, medium, large-v3)
+# Recommend 'medium' or 'small' for local CPU debugging
+WHISPER_MODEL = os.getenv('WHISPER_MODEL', 'large-v3')
+# Language Override (e.g. 'en', 'zh', or None to auto-detect)
+WHISPER_LANGUAGE = os.getenv('WHISPER_LANGUAGE', None)
+# Initial Prompt to guide the model (e.g. "Mixed English and Chinese")
+WHISPER_INITIAL_PROMPT = os.getenv('WHISPER_INITIAL_PROMPT', None)
 
 # --- SECRETS ---
 # Load strictly from env vars for security

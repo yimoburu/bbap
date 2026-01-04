@@ -1,4 +1,4 @@
-git+[https://github.com/m-bain/whisperx.git](https://github.com/m-bain/whisperx.git)
+git+https://github.com/m-bain/whisperx.git
 pyannote.audio
 torch
 numpy

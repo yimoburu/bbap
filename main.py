@@ -1,4 +1,11 @@
 import os
+import certifi
+import ssl
+
+# Fix MacOS SSL Certificate errors (Aggressive Fix)
+os.environ['SSL_CERT_FILE'] = certifi.where()
+ssl._create_default_https_context = ssl._create_unverified_context
+
 import config
 import utils
 import pipeline

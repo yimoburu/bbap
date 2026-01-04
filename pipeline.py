@@ -20,7 +20,9 @@ def run(file_path, filename, model_manager):
     # It will not transcribe long periods of silence.
     result = model_manager.transcription_model.transcribe(
         audio, 
-        batch_size=config.BATCH_SIZE
+        batch_size=config.BATCH_SIZE,
+        language=config.WHISPER_LANGUAGE,
+        task="transcribe"
     )
     
     # --- 2. ALIGN ---
