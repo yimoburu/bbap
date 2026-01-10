@@ -18,18 +18,13 @@ def run(file_path, filename, model_manager):
     # load_audio internally resamples to 16k
     audio = whisperx.load_audio(file_path)
     
-    # WhisperX performs VAD (Voice Activity Detection) here implicitly.
-    # It will not transcribe long periods of silence.
-    # Note: vad_options are configured in ModelManager.load_model(), not in transcribe()
-    result = model_manager.transcription_model.transcribe(
+    # Use modular transcriber component
+    result = model_manager.transcriber.transcribe(
         audio, 
         batch_size=config.BATCH_SIZE,
         language=config.WHISPER_LANGUAGE,
         task="transcribe",
-        print_progress=True,
-        verbose=True,
-        combined_progress=False,
-        chunk_size=config.WHISPERX_VAD_CHUNK_SIZE,
+    #    chunk_size=config.WHISPERX_VAD_CHUNK_SIZE,
 
     )
     
@@ -40,38 +35,27 @@ def run(file_path, filename, model_manager):
     
     # --- 3. DIARIZE ---
     print("      3. Diarizing Speakers...")
-    diarize_model = model_manager.get_diarization_pipeline()
     
-    # Prepare audio for pyannote Pipeline
-    # Pyannote expects a dict with "waveform" (torch.Tensor) and "sample_rate"
+    # Prepare audio for diarizer
+    # Diarizer expects a dict with "waveform" (torch.Tensor) and "sample_rate"
     audio_tensor = torch.from_numpy(audio[None, :]).float()  # Add batch dimension: (1, samples)
     audio_dict = {
         'waveform': audio_tensor,
         'sample_rate': audio_sample_rate  # 16kHz
     }
     
-    # Specify min_speakers and max_speakers to help diarization detect multiple speakers
-    diarize_kwargs = {}
-    if config.MIN_SPEAKERS is not None:
-        diarize_kwargs['min_speakers'] = config.MIN_SPEAKERS
-    if config.MAX_SPEAKERS is not None:
-        diarize_kwargs['max_speakers'] = config.MAX_SPEAKERS
-    
-    diarization_annotation = diarize_model(audio_dict, **diarize_kwargs)
-    
-    # Convert pyannote Annotation to pandas DataFrame format expected by assign_word_speakers
-    diarization_segments = pd.DataFrame(
-        diarization_annotation.itertracks(yield_label=True),
-        columns=['segment', 'label', 'speaker']
+    # Use modular diarizer component
+    diarization_segments = model_manager.diarizer.diarize(
+        audio_dict,
+        min_speakers=config.MIN_SPEAKERS,
+        max_speakers=config.MAX_SPEAKERS
     )
-    diarization_segments['start'] = diarization_segments['segment'].apply(lambda x: x.start)
-    diarization_segments['end'] = diarization_segments['segment'].apply(lambda x: x.end)
     
     # Assign speaker labels (SPEAKER_01) to word segments
     final_result = whisperx.assign_word_speakers(diarization_segments, result)
     
     # Free memory immediately
-    del diarize_model
+    model_manager.diarizer.cleanup()
     model_manager.cleanup()
 
     # --- 4. IDENTIFY (Vector Matching) ---
@@ -102,21 +86,13 @@ def run(file_path, filename, model_manager):
             wav = torch.from_numpy(wav_data).float().unsqueeze(0)  # (1, samples) - correct format
             
             # Generate Embedding (Fingerprint)
-            # Inference expects a dict with "waveform" (channel, time) and "sample_rate"
+            # Embedder expects a dict with "waveform" (channel, time) and "sample_rate"
             audio_dict = {
                 'waveform': wav,  # (1, samples) format
                 'sample_rate': audio_sample_rate
             }
-            # Inference returns embeddings, convert to numpy and take mean if needed
-            embedding_output = model_manager.embedding_model(audio_dict)
-            # Handle output - could be tensor or numpy array
-            if isinstance(embedding_output, torch.Tensor):
-                fingerprint = embedding_output.cpu().numpy()
-            else:
-                fingerprint = np.array(embedding_output)
-            # If output has batch dimension, take mean
-            if len(fingerprint.shape) > 1:
-                fingerprint = fingerprint.mean(axis=0)
+            # Use modular embedder component
+            fingerprint = model_manager.embedder.embed(audio_dict)
             
             # Compare against known database
             best_match = None

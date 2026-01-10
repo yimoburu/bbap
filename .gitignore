@@ -5,3 +5,5 @@ __pycache__/
 local_input/
 local_output/
 processed_log.txt
+.DS_Store
+local_data/
