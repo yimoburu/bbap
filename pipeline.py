@@ -1,5 +1,7 @@
 import os
 import torch
+import numpy as np
+import pandas as pd
 import whisperx
 import pyannote.core
 from datetime import timedelta
@@ -18,26 +20,52 @@ def run(file_path, filename, model_manager):
     
     # WhisperX performs VAD (Voice Activity Detection) here implicitly.
     # It will not transcribe long periods of silence.
+    # Note: vad_options are configured in ModelManager.load_model(), not in transcribe()
     result = model_manager.transcription_model.transcribe(
         audio, 
         batch_size=config.BATCH_SIZE,
         language=config.WHISPER_LANGUAGE,
-        task="transcribe"
+        task="transcribe",
+        print_progress=True,
+        verbose=True,
+        combined_progress=False,
+        chunk_size=config.WHISPERX_VAD_CHUNK_SIZE,
+
     )
     
     # --- 2. ALIGN ---
     print("      2. Aligning Timestamps...")
-    model_a, metadata = model_manager.load_align_model(language_code=result["language"])
-    result = whisperx.align(result["segments"], model_a, metadata, audio, config.DEVICE, return_char_alignments=False)
-    
-    # Free memory immediately
-    del model_a
-    model_manager.cleanup()
+    audio_sample_rate = 16000  # whisperx.load_audio resamples to 16kHz
+    result = model_manager.align(result["segments"], audio, audio_sample_rate, result["language"])
     
     # --- 3. DIARIZE ---
     print("      3. Diarizing Speakers...")
     diarize_model = model_manager.get_diarization_pipeline()
-    diarization_segments = diarize_model(audio)
+    
+    # Prepare audio for pyannote Pipeline
+    # Pyannote expects a dict with "waveform" (torch.Tensor) and "sample_rate"
+    audio_tensor = torch.from_numpy(audio[None, :]).float()  # Add batch dimension: (1, samples)
+    audio_dict = {
+        'waveform': audio_tensor,
+        'sample_rate': audio_sample_rate  # 16kHz
+    }
+    
+    # Specify min_speakers and max_speakers to help diarization detect multiple speakers
+    diarize_kwargs = {}
+    if config.MIN_SPEAKERS is not None:
+        diarize_kwargs['min_speakers'] = config.MIN_SPEAKERS
+    if config.MAX_SPEAKERS is not None:
+        diarize_kwargs['max_speakers'] = config.MAX_SPEAKERS
+    
+    diarization_annotation = diarize_model(audio_dict, **diarize_kwargs)
+    
+    # Convert pyannote Annotation to pandas DataFrame format expected by assign_word_speakers
+    diarization_segments = pd.DataFrame(
+        diarization_annotation.itertracks(yield_label=True),
+        columns=['segment', 'label', 'speaker']
+    )
+    diarization_segments['start'] = diarization_segments['segment'].apply(lambda x: x.start)
+    diarization_segments['end'] = diarization_segments['segment'].apply(lambda x: x.end)
     
     # Assign speaker labels (SPEAKER_01) to word segments
     final_result = whisperx.assign_word_speakers(diarization_segments, result)
@@ -69,13 +97,26 @@ def run(file_path, filename, model_manager):
             start_sample = int(best_seg['start'] * 16000)
             end_sample = int(best_seg['end'] * 16000)
             
-            # Extract segment as tensor: (1, samples)
+            # Extract segment as tensor: (channel, time) format = (1, samples) for mono
             wav_data = audio[start_sample:end_sample]
-            wav = torch.from_numpy(wav_data).float().unsqueeze(0)
+            wav = torch.from_numpy(wav_data).float().unsqueeze(0)  # (1, samples) - correct format
             
             # Generate Embedding (Fingerprint)
-            # unsqueeze adds batch dimension: (1, channels, samples)
-            fingerprint = model_manager.embedding_model(wav.unsqueeze(0)).mean(axis=0)
+            # Inference expects a dict with "waveform" (channel, time) and "sample_rate"
+            audio_dict = {
+                'waveform': wav,  # (1, samples) format
+                'sample_rate': audio_sample_rate
+            }
+            # Inference returns embeddings, convert to numpy and take mean if needed
+            embedding_output = model_manager.embedding_model(audio_dict)
+            # Handle output - could be tensor or numpy array
+            if isinstance(embedding_output, torch.Tensor):
+                fingerprint = embedding_output.cpu().numpy()
+            else:
+                fingerprint = np.array(embedding_output)
+            # If output has batch dimension, take mean
+            if len(fingerprint.shape) > 1:
+                fingerprint = fingerprint.mean(axis=0)
             
             # Compare against known database
             best_match = None
@@ -117,11 +158,11 @@ def run(file_path, filename, model_manager):
     for segment in final_result["segments"]:
         # Calculate Time
         if start_dt:
-            # Absolute Wall-Clock Time
+            # Absolute Wall-Clock Time with date
             s_time = start_dt + timedelta(seconds=segment['start'])
-            start = s_time.strftime('%H:%M:%S')
+            start = s_time.strftime('%Y-%m-%d %H:%M:%S')
         else:
-            # Relative Time
+            # Relative Time (fallback if no date in filename)
             start = timedelta(seconds=int(segment['start']))
             
         raw_speaker = segment.get('speaker', 'Unknown')

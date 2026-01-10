@@ -70,6 +70,42 @@ WHISPER_LANGUAGE = os.getenv('WHISPER_LANGUAGE', None)
 # Initial Prompt to guide the model (e.g. "Mixed English and Chinese")
 WHISPER_INITIAL_PROMPT = os.getenv('WHISPER_INITIAL_PROMPT', None)
 
+# Diarization speaker count (for conversations, typically 2)
+# Set to None to auto-detect, or specify min/max for better accuracy
+MIN_SPEAKERS = int(os.getenv('MIN_SPEAKERS', '2')) if os.getenv('MIN_SPEAKERS') else None
+MAX_SPEAKERS = int(os.getenv('MAX_SPEAKERS', '10')) if os.getenv('MAX_SPEAKERS') else None
+
+# Diarization model selection
+# Options: "pyannote/speaker-diarization-3.1" (default, best quality)
+#          "pyannote/speaker-diarization-3.0" (faster, slightly lower quality)
+DIARIZATION_MODEL = os.getenv('DIARIZATION_MODEL', 'pyannote/speaker-diarization-3.1')
+
+# Clustering threshold for diarization (lower = more speakers detected, higher = fewer)
+# Range: 0.0 to 1.0, default: 0.7 (pyannote default)
+# Lower values (0.5-0.6) = more sensitive, may create more speaker clusters
+# Higher values (0.8-0.9) = less sensitive, may merge similar speakers
+DIARIZATION_CLUSTERING_THRESHOLD = float(os.getenv('DIARIZATION_CLUSTERING_THRESHOLD', '0.7'))
+
+# WhisperX VAD (Voice Activity Detection) parameters for better segmentation
+# These are passed to whisperx.load_model() via vad_options
+# Lower values = more sensitive (detects more segments, catches shorter speech)
+# Higher values = less sensitive (fewer segments, only longer speech)
+# Default WhisperX values: vad_onset=0.500, vad_offset=0.363, chunk_size=30
+WHISPERX_VAD_METHOD = os.getenv('WHISPERX_VAD_METHOD', 'pyannote')  # Options: "pyannote" (default, more accurate) or "silero" (faster)
+WHISPERX_VAD_ONSET = float(os.getenv('WHISPERX_VAD_ONSET', '0.5'))  # Speech start threshold (0.0-1.0)
+WHISPERX_VAD_OFFSET = float(os.getenv('WHISPERX_VAD_OFFSET', '0.363'))  # Speech end threshold (0.0-1.0)
+WHISPERX_VAD_CHUNK_SIZE = float(os.getenv('WHISPERX_VAD_CHUNK_SIZE', '5'))  # Max chunk size in seconds (default: 30). Smaller = more segments, less merging
+WHISPERX_VAD_MIN_DURATION_ON = float(os.getenv('WHISPERX_VAD_MIN_DURATION_ON', '0.0'))  # Min speech duration (seconds)
+WHISPERX_VAD_MIN_DURATION_OFF = float(os.getenv('WHISPERX_VAD_MIN_DURATION_OFF', '0.0'))  # Min silence to split (seconds)
+
+# Pyannote VAD parameters (for external VAD if needed)
+# Lower values = more sensitive (detects more segments, catches shorter speech)
+# Higher values = less sensitive (fewer segments, only longer speech)
+VAD_ONSET = float(os.getenv('VAD_ONSET', '0.3'))  # Speech start threshold (0.0-1.0)
+VAD_OFFSET = float(os.getenv('VAD_OFFSET', '0.1'))  # Speech end threshold (0.0-1.0)
+VAD_MIN_DURATION_ON = float(os.getenv('VAD_MIN_DURATION_ON', '0.0'))  # Min speech duration (seconds)
+VAD_MIN_DURATION_OFF = float(os.getenv('VAD_MIN_DURATION_OFF', '0.0'))  # Min silence to split (seconds)
+
 # --- SECRETS ---
 # Load strictly from env vars for security
 HF_TOKEN = os.getenv('HF_TOKEN')
